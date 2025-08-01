@@ -4,12 +4,13 @@ import WorklogViewer from "./components/WorklogViewer";
 import ReportGenerator from "./components/ReportGenerator";
 import Settings from "./components/Settings";
 import Calendar from "./components/Calendar";
+import Timer from "./components/Timer";
 import { readWorklog, undoLastChange } from "./lib/fileUtils";
 
 function App() {
   const [worklogContent, setWorklogContent] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'input' | 'reports' | 'calendar' | 'settings'>('input');
+  const [activeTab, setActiveTab] = useState<'input' | 'reports' | 'calendar' | 'timer' | 'settings'>('input');
   const [showUndoConfirm, setShowUndoConfirm] = useState<boolean>(false);
 
   const loadWorklog = async () => {
@@ -103,6 +104,18 @@ function App() {
                 <span>Calendar</span>
               </button>
               <button
+                onClick={() => setActiveTab('timer')}
+                className={`px-4 py-2 text-sm font-medium rounded-md transition-all duration-200 flex items-center space-x-2 ${
+                  activeTab === 'timer'
+                    ? 'text-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-200'
+                }`}
+                style={activeTab === 'timer' ? {backgroundColor: '#3F72AF'} : {}}
+              >
+                <span>⏰</span>
+                <span>Timer</span>
+              </button>
+              <button
                 onClick={() => setActiveTab('settings')}
                 className={`px-4 py-2 text-sm font-medium rounded-md transition-all duration-200 flex items-center space-x-2 ${
                   activeTab === 'settings'
@@ -159,6 +172,12 @@ function App() {
           <div className="w-full">
             <div className="bg-white rounded-2xl shadow-xl h-full overflow-hidden">
               <Calendar />
+            </div>
+          </div>
+        ) : activeTab === 'timer' ? (
+          <div className="w-full">
+            <div className="bg-white rounded-2xl shadow-xl h-full overflow-hidden">
+              <Timer />
             </div>
           </div>
         ) : (

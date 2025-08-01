@@ -26,6 +26,9 @@
       },
       "path": {
         "all": false
+      },
+      "notification": {
+        "all": true
       }
     },
     "bundle": {
