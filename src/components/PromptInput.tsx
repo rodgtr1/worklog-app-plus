@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { processWorklog, getOpenAIKeyStatus } from "../lib/fileUtils";
+import { processWorklog, getOpenAIKeyStatus, getTodaysTimeBlocks, TimeBlock } from "../lib/fileUtils";
 
 interface PromptInputProps {
   onWorklogUpdate: () => void;
@@ -10,10 +10,21 @@ function PromptInput({ onWorklogUpdate }: PromptInputProps) {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
   const [hasApiKey, setHasApiKey] = useState<boolean>(false);
+  const [todaysBlocks, setTodaysBlocks] = useState<TimeBlock[]>([]);
 
   useEffect(() => {
     checkApiKeyStatus();
+    loadTodaysBlocks();
   }, []);
+
+  const loadTodaysBlocks = async () => {
+    try {
+      const blocks = await getTodaysTimeBlocks();
+      setTodaysBlocks(blocks);
+    } catch (error) {
+      console.error("Failed to load today's blocks:", error);
+    }
+  };
 
   const checkApiKeyStatus = async () => {
     try {
@@ -98,6 +109,71 @@ function PromptInput({ onWorklogUpdate }: PromptInputProps) {
           </div>
         )}
 
+        {todaysBlocks.length > 0 && (
+          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-start space-x-3">
+              <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                <span className="text-sm">📅</span>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-blue-800 mb-2">
+                  Today's Focus
+                </p>
+                <div className="space-y-2">
+                  {todaysBlocks.map((block) => {
+                    const blockStart = new Date(block.startDate);
+                    const blockEnd = new Date(block.endDate);
+                    const today = new Date();
+                    
+                    // Helper function to check if a date is a weekday
+                    const isWeekday = (date: Date) => {
+                      const dayOfWeek = date.getDay();
+                      return dayOfWeek >= 1 && dayOfWeek <= 5;
+                    };
+                    
+                    // Calculate which weekday of the project this is
+                    let weekdayNumber = 0;
+                    let totalWeekdays = 0;
+                    const tempDate = new Date(blockStart);
+                    
+                    // Count weekdays up to today
+                    while (tempDate <= today) {
+                      if (isWeekday(tempDate)) {
+                        weekdayNumber++;
+                      }
+                      tempDate.setDate(tempDate.getDate() + 1);
+                    }
+                    
+                    // Count total weekdays in project
+                    tempDate.setTime(blockStart.getTime());
+                    while (tempDate <= blockEnd) {
+                      if (isWeekday(tempDate)) {
+                        totalWeekdays++;
+                      }
+                      tempDate.setDate(tempDate.getDate() + 1);
+                    }
+                    
+                    return (
+                      <div
+                        key={block.id}
+                        className="flex items-center space-x-2 text-xs text-blue-700"
+                      >
+                        <div
+                          className="w-3 h-3 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: block.color }}
+                        ></div>
+                        <span className="font-medium">{block.project}</span>
+                        <span className="text-blue-500">
+                          · Day {weekdayNumber} of {totalWeekdays}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         
         <div className="flex-1 flex flex-col">
           <label htmlFor="entries" className="block text-sm font-semibold text-gray-700 mb-3 flex items-center space-x-2">
