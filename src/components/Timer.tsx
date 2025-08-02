@@ -1,4 +1,11 @@
 import { useState, useEffect, useRef } from "react";
+import { 
+  FocusTask, 
+  FocusSession,
+  getTodaysFocusTasks, 
+  startFocusSession, 
+  completeFocusSession 
+} from "../lib/fileUtils";
 
 function Timer() {
   const [duration, setDuration] = useState(25); // Default 25 minutes (Pomodoro)
@@ -8,6 +15,15 @@ function Timer() {
   const [soundOption, setSoundOption] = useState<'gentle' | 'chime' | 'ding' | 'success' | 'none'>('gentle');
   const [twoMinuteWarningShown, setTwoMinuteWarningShown] = useState(false);
   const [oneMinuteWarningShown, setOneMinuteWarningShown] = useState(false);
+  
+  // Focus task integration
+  const [availableTasks, setAvailableTasks] = useState<FocusTask[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [currentSession, setCurrentSession] = useState<FocusSession | null>(null);
+  const [showTaskSelection, setShowTaskSelection] = useState(false);
+  const [showSessionComplete, setShowSessionComplete] = useState(false);
+  const [sessionNotes, setSessionNotes] = useState("");
+  
   const intervalRef = useRef<number | null>(null);
 
   const playAlertSound = () => {
@@ -215,6 +231,23 @@ function Timer() {
     }
   };
 
+  // Load available focus tasks
+  const loadTasks = () => {
+    const tasks = getTodaysFocusTasks();
+    setAvailableTasks(tasks);
+  };
+
+  // Get selected task details
+  const getSelectedTask = () => {
+    if (!selectedTaskId) return null;
+    return availableTasks.find(task => task.id === selectedTaskId) || null;
+  };
+
+  // Load tasks on component mount
+  useEffect(() => {
+    loadTasks();
+  }, []);
+
   // Update timeLeft when duration changes
   useEffect(() => {
     if (!isRunning) {
@@ -247,6 +280,12 @@ function Timer() {
           if (prev <= 1) {
             setIsRunning(false);
             setIsCompleted(true);
+            
+            // Show session completion modal if there's an active session
+            if (currentSession) {
+              setShowSessionComplete(true);
+            }
+            
             // Gentle alert - native notification and audio
             (async () => {
               try {
@@ -254,13 +293,13 @@ function Timer() {
                 const { sendNotification } = await import('@tauri-apps/api/notification');
                 await sendNotification({
                   title: 'Focus Timer Complete! 🎉',
-                  body: 'Great job! Time for a well-deserved break.',
+                  body: currentSession ? `Completed: ${currentSession.taskTitle}` : 'Great job! Time for a well-deserved break.',
                 });
               } catch (error) {
                 // Fallback to browser notification
                 if (Notification.permission === 'granted') {
                   new Notification('Focus Timer Complete! 🎉', {
-                    body: 'Great job! Time for a break.',
+                    body: currentSession ? `Completed: ${currentSession.taskTitle}` : 'Great job! Time for a break.',
                     icon: '⏰'
                   });
                 }
@@ -298,9 +337,45 @@ function Timer() {
 
   const handleStart = () => {
     if (timeLeft > 0) {
-      setIsRunning(true);
-      setIsCompleted(false);
+      // Show task selection before starting timer
+      setShowTaskSelection(true);
     }
+  };
+
+  // Start timer with selected task
+  const handleStartWithTask = () => {
+    const selectedTask = getSelectedTask();
+    const taskTitle = selectedTask ? selectedTask.title : "Free Focus Time";
+    
+    // Create a new focus session
+    const session = startFocusSession(selectedTaskId, taskTitle, duration);
+    setCurrentSession(session);
+    
+    // Start the timer
+    setIsRunning(true);
+    setIsCompleted(false);
+    setShowTaskSelection(false);
+    
+    // Reload tasks to get updated data
+    loadTasks();
+  };
+
+  // Complete the current session
+  const handleCompleteSession = () => {
+    if (currentSession) {
+      completeFocusSession(currentSession.id, sessionNotes.trim() || undefined);
+      setCurrentSession(null);
+      setSessionNotes("");
+      loadTasks(); // Refresh tasks to show updated session counts
+    }
+    setShowSessionComplete(false);
+  };
+
+  // Skip session completion (don't mark as complete)
+  const handleSkipSession = () => {
+    setCurrentSession(null);
+    setSessionNotes("");
+    setShowSessionComplete(false);
   };
 
   const handlePause = () => {
@@ -313,6 +388,10 @@ function Timer() {
     setIsCompleted(false);
     setTwoMinuteWarningShown(false);
     setOneMinuteWarningShown(false);
+    setCurrentSession(null);
+    setSelectedTaskId(null);
+    setShowSessionComplete(false);
+    setSessionNotes("");
   };
 
   // Calculate angles for timer
@@ -382,6 +461,19 @@ function Timer() {
         <h2 className="text-2xl font-bold text-gray-800 mb-1">Focus Timer</h2>
         <p className="text-gray-600 text-sm">Set your focus time and watch the clock count down</p>
       </div>
+
+      {/* Active Task Display */}
+      {currentSession && (
+        <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-4 mb-4 flex-shrink-0 max-w-md">
+          <div className="text-center">
+            <h3 className="text-lg font-semibold text-gray-800 mb-1">Currently Working On</h3>
+            <p className="text-blue-600 font-medium">{currentSession.taskTitle}</p>
+            <div className="text-xs text-gray-500 mt-2">
+              Session Duration: {currentSession.duration} minutes
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Clock Face */}
       <div className="relative mb-4 flex-shrink-0">
@@ -652,10 +744,128 @@ function Timer() {
       </div>
 
       {/* Completion message */}
-      {isCompleted && (
+      {isCompleted && !showSessionComplete && (
         <div className="mt-4 text-center animate-pulse flex-shrink-0">
           <div className="text-xl font-bold text-green-600 mb-1">🎉 Focus Session Complete! 🎉</div>
           <div className="text-gray-600 text-sm">Great job! Time for a well-deserved break.</div>
+        </div>
+      )}
+
+      {/* Task Selection Modal */}
+      {showTaskSelection && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+            <div className="p-6">
+              <div className="flex items-center space-x-4 mb-4">
+                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <span className="text-blue-600 text-xl">🎯</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Choose Your Focus</h3>
+                  <p className="text-sm text-gray-500 mt-1">What will you work on for {duration} minutes?</p>
+                </div>
+              </div>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select Task
+                </label>
+                <select
+                  value={selectedTaskId || ""}
+                  onChange={(e) => setSelectedTaskId(e.target.value || null)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">🆓 Free Focus Time</option>
+                  {availableTasks.filter(task => !task.completed).map((task) => (
+                    <option key={task.id} value={task.id}>
+                      {task.title} ({task.sessionsCompleted} sessions)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              {availableTasks.length === 0 && (
+                <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <p className="text-sm text-yellow-800">
+                    No focus tasks for today. Visit the Focus tab to add some, or start with free focus time.
+                  </p>
+                </div>
+              )}
+              
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setShowTaskSelection(false)}
+                  className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleStartWithTask}
+                  className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all duration-200 font-medium flex items-center justify-center space-x-2"
+                >
+                  <span>▶️</span>
+                  <span>Start Focus</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Session Completion Modal */}
+      {showSessionComplete && currentSession && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+            <div className="p-6">
+              <div className="flex items-center space-x-4 mb-4">
+                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <span className="text-green-600 text-xl">✅</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Session Complete!</h3>
+                  <p className="text-sm text-gray-500 mt-1">How did your focus session go?</p>
+                </div>
+              </div>
+              
+              <div className="mb-4">
+                <div className="text-sm text-gray-700 mb-3">
+                  <strong>Task:</strong> {currentSession.taskTitle}
+                </div>
+                <div className="text-sm text-gray-700 mb-3">
+                  <strong>Duration:</strong> {currentSession.duration} minutes
+                </div>
+              </div>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Notes (optional)
+                </label>
+                <textarea
+                  value={sessionNotes}
+                  onChange={(e) => setSessionNotes(e.target.value)}
+                  placeholder="What did you accomplish? Any observations?"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  rows={3}
+                />
+              </div>
+              
+              <div className="flex space-x-3">
+                <button
+                  onClick={handleSkipSession}
+                  className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium"
+                >
+                  Skip
+                </button>
+                <button
+                  onClick={handleCompleteSession}
+                  className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all duration-200 font-medium flex items-center justify-center space-x-2"
+                >
+                  <span>✅</span>
+                  <span>Complete Session</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

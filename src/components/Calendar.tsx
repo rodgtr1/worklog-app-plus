@@ -343,8 +343,6 @@ function Calendar() {
                       
                       {/* Time blocks */}
                       {dayBlocks.map((block, blockIndex) => {
-                        const blockStart = new Date(block.startDate);
-                        const blockEnd = new Date(block.endDate);
                         const dayDate = new Date(currentYear, currentMonth, day);
                         
                         // Calculate which weekday of the project this is

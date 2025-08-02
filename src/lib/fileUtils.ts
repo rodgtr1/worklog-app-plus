@@ -193,3 +193,153 @@ export const getTodaysTimeBlocks = async (): Promise<TimeBlock[]> => {
     return [];
   }
 };
+
+// Focus Sessions functionality
+export interface FocusTask {
+  id: string;
+  title: string;
+  category: 'deep-work' | 'admin' | 'creative' | 'learning' | 'meetings' | 'other';
+  completed: boolean;
+  sessionsCompleted: number;
+  estimatedSessions?: number;
+  createdAt: string;
+}
+
+export interface FocusSession {
+  id: string;
+  taskId: string | null; // null for free focus time
+  taskTitle: string;
+  duration: number; // in minutes
+  completed: boolean;
+  completedAt?: string;
+  notes?: string;
+  date: string; // YYYY-MM-DD format
+}
+
+// Get today's focus tasks from local storage (for now, we can move to Rust backend later)
+export const getTodaysFocusTasks = (): FocusTask[] => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const tasksJson = localStorage.getItem(`focus-tasks-${today}`);
+    return tasksJson ? JSON.parse(tasksJson) : [];
+  } catch (error) {
+    console.error("Error getting today's focus tasks:", error);
+    return [];
+  }
+};
+
+// Save today's focus tasks
+export const saveTodaysFocusTasks = (tasks: FocusTask[]): void => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    localStorage.setItem(`focus-tasks-${today}`, JSON.stringify(tasks));
+  } catch (error) {
+    console.error("Error saving today's focus tasks:", error);
+    throw error;
+  }
+};
+
+// Add a new focus task for today
+export const addFocusTask = (title: string, category: FocusTask['category'], estimatedSessions?: number): FocusTask => {
+  const newTask: FocusTask = {
+    id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    title,
+    category,
+    completed: false,
+    sessionsCompleted: 0,
+    estimatedSessions,
+    createdAt: new Date().toISOString(),
+  };
+  
+  const tasks = getTodaysFocusTasks();
+  tasks.push(newTask);
+  saveTodaysFocusTasks(tasks);
+  
+  return newTask;
+};
+
+// Update a focus task
+export const updateFocusTask = (taskId: string, updates: Partial<FocusTask>): void => {
+  const tasks = getTodaysFocusTasks();
+  const taskIndex = tasks.findIndex(task => task.id === taskId);
+  
+  if (taskIndex !== -1) {
+    tasks[taskIndex] = { ...tasks[taskIndex], ...updates };
+    saveTodaysFocusTasks(tasks);
+  }
+};
+
+// Delete a focus task
+export const deleteFocusTask = (taskId: string): void => {
+  const tasks = getTodaysFocusTasks();
+  const filteredTasks = tasks.filter(task => task.id !== taskId);
+  saveTodaysFocusTasks(filteredTasks);
+};
+
+// Focus sessions management
+export const getTodaysFocusSessions = (): FocusSession[] => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const sessionsJson = localStorage.getItem(`focus-sessions-${today}`);
+    return sessionsJson ? JSON.parse(sessionsJson) : [];
+  } catch (error) {
+    console.error("Error getting today's focus sessions:", error);
+    return [];
+  }
+};
+
+// Save today's focus sessions
+export const saveTodaysFocusSessions = (sessions: FocusSession[]): void => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    localStorage.setItem(`focus-sessions-${today}`, JSON.stringify(sessions));
+  } catch (error) {
+    console.error("Error saving today's focus sessions:", error);
+    throw error;
+  }
+};
+
+// Start a new focus session
+export const startFocusSession = (taskId: string | null, taskTitle: string, duration: number): FocusSession => {
+  const newSession: FocusSession = {
+    id: `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    taskId,
+    taskTitle,
+    duration,
+    completed: false,
+    date: new Date().toISOString().split('T')[0],
+  };
+  
+  const sessions = getTodaysFocusSessions();
+  sessions.push(newSession);
+  saveTodaysFocusSessions(sessions);
+  
+  return newSession;
+};
+
+// Complete a focus session
+export const completeFocusSession = (sessionId: string, notes?: string): void => {
+  const sessions = getTodaysFocusSessions();
+  const sessionIndex = sessions.findIndex(session => session.id === sessionId);
+  
+  if (sessionIndex !== -1) {
+    sessions[sessionIndex] = {
+      ...sessions[sessionIndex],
+      completed: true,
+      completedAt: new Date().toISOString(),
+      notes,
+    };
+    saveTodaysFocusSessions(sessions);
+    
+    // Update task session count if it has a taskId
+    const session = sessions[sessionIndex];
+    if (session.taskId) {
+      const tasks = getTodaysFocusTasks();
+      const taskIndex = tasks.findIndex(task => task.id === session.taskId);
+      if (taskIndex !== -1) {
+        tasks[taskIndex].sessionsCompleted += 1;
+        saveTodaysFocusTasks(tasks);
+      }
+    }
+  }
+};
