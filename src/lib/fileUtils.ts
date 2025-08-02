@@ -211,8 +211,19 @@ export interface FocusSession {
   taskTitle: string;
   duration: number; // in minutes
   completed: boolean;
+  startedAt: string;
   completedAt?: string;
   notes?: string;
+  date: string; // YYYY-MM-DD format
+}
+
+export interface BreakSession {
+  id: string;
+  duration: number; // in minutes
+  completed: boolean;
+  startedAt: string;
+  completedAt?: string;
+  activity?: string;
   date: string; // YYYY-MM-DD format
 }
 
@@ -307,6 +318,7 @@ export const startFocusSession = (taskId: string | null, taskTitle: string, dura
     taskTitle,
     duration,
     completed: false,
+    startedAt: new Date().toISOString(),
     date: new Date().toISOString().split('T')[0],
   };
   
@@ -342,4 +354,182 @@ export const completeFocusSession = (sessionId: string, notes?: string): void =>
       }
     }
   }
+};
+
+// Break sessions management
+export const getTodaysBreakSessions = (): BreakSession[] => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const breaksJson = localStorage.getItem(`break-sessions-${today}`);
+    return breaksJson ? JSON.parse(breaksJson) : [];
+  } catch (error) {
+    console.error("Error getting today's break sessions:", error);
+    return [];
+  }
+};
+
+// Save today's break sessions
+export const saveTodaysBreakSessions = (breaks: BreakSession[]): void => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    localStorage.setItem(`break-sessions-${today}`, JSON.stringify(breaks));
+  } catch (error) {
+    console.error("Error saving today's break sessions:", error);
+    throw error;
+  }
+};
+
+// Start a new break session
+export const startBreakSession = (duration: number, activity?: string): BreakSession => {
+  const newBreak: BreakSession = {
+    id: `break-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    duration,
+    completed: false,
+    startedAt: new Date().toISOString(),
+    activity,
+    date: new Date().toISOString().split('T')[0],
+  };
+  
+  const breaks = getTodaysBreakSessions();
+  breaks.push(newBreak);
+  saveTodaysBreakSessions(breaks);
+  
+  return newBreak;
+};
+
+// Complete a break session
+export const completeBreakSession = (breakId: string): void => {
+  const breaks = getTodaysBreakSessions();
+  const breakIndex = breaks.findIndex(breakSession => breakSession.id === breakId);
+  
+  if (breakIndex !== -1) {
+    breaks[breakIndex] = {
+      ...breaks[breakIndex],
+      completed: true,
+      completedAt: new Date().toISOString(),
+    };
+    saveTodaysBreakSessions(breaks);
+  }
+};
+
+// Get break recommendation based on completed sessions
+export const getBreakRecommendation = (): { shouldBreak: boolean; duration: number; message: string } => {
+  const sessions = getTodaysFocusSessions();
+  const breaks = getTodaysBreakSessions();
+  
+  const completedSessions = sessions.filter(s => s.completed).length;
+  const completedBreaks = breaks.filter(b => b.completed).length;
+  
+  // Don't recommend a break if we just took one
+  const lastSession = sessions.slice(-1)[0];
+  const lastBreak = breaks.slice(-1)[0];
+  
+  if (lastBreak && lastSession && lastBreak.completedAt && lastSession.completedAt) {
+    const lastBreakTime = new Date(lastBreak.completedAt).getTime();
+    const lastSessionTime = new Date(lastSession.completedAt).getTime();
+    
+    // If the last break was after the last session, don't recommend another break yet
+    if (lastBreakTime > lastSessionTime) {
+      return { shouldBreak: false, duration: 0, message: "" };
+    }
+  }
+  
+  // Recommend breaks based on sessions completed since last break
+  const sessionsSinceLastBreak = completedSessions - completedBreaks;
+  
+  if (sessionsSinceLastBreak >= 3) {
+    return {
+      shouldBreak: true,
+      duration: 15,
+      message: "You've completed 3 focus sessions! Time for a 15-minute break."
+    };
+  } else if (sessionsSinceLastBreak >= 2) {
+    return {
+      shouldBreak: true,
+      duration: 10,
+      message: "Nice momentum! Take a 10-minute break to recharge."
+    };
+  } else if (sessionsSinceLastBreak >= 1 && completedSessions === 1) {
+    return {
+      shouldBreak: true,
+      duration: 5,
+      message: "Great start! Take a quick 5-minute break?"
+    };
+  }
+  
+  return { shouldBreak: false, duration: 0, message: "" };
+};
+
+// Orphaned session cleanup utilities
+export const getOrphanedSessions = (): FocusSession[] => {
+  const sessions = getTodaysFocusSessions();
+  return sessions.filter(session => !session.completed);
+};
+
+export const getOrphanedBreaks = (): BreakSession[] => {
+  const breaks = getTodaysBreakSessions();
+  return breaks.filter(breakSession => !breakSession.completed);
+};
+
+export const cleanupOrphanedSessions = (action: 'complete' | 'delete'): void => {
+  const sessions = getTodaysFocusSessions();
+  const orphanedSessions = sessions.filter(session => !session.completed);
+  
+  if (action === 'complete') {
+    // Mark orphaned sessions as completed
+    orphanedSessions.forEach(session => {
+      completeFocusSession(session.id, 'Session interrupted - auto-completed on restart');
+    });
+  } else if (action === 'delete') {
+    // Remove orphaned sessions entirely
+    const completedSessions = sessions.filter(session => session.completed);
+    saveTodaysFocusSessions(completedSessions);
+  }
+};
+
+export const cleanupOrphanedBreaks = (action: 'complete' | 'delete'): void => {
+  const breaks = getTodaysBreakSessions();
+  const orphanedBreaks = breaks.filter(breakSession => !breakSession.completed);
+  
+  if (action === 'complete') {
+    // Mark orphaned breaks as completed
+    orphanedBreaks.forEach(breakSession => {
+      completeBreakSession(breakSession.id);
+    });
+  } else if (action === 'delete') {
+    // Remove orphaned breaks entirely
+    const completedBreaks = breaks.filter(breakSession => breakSession.completed);
+    saveTodaysBreakSessions(completedBreaks);
+  }
+};
+
+// Check if an orphaned session is likely stale (started more than its duration + 5 min ago)
+export const isSessionStale = (session: FocusSession): boolean => {
+  if (session.completed) return false;
+  
+  const startTime = new Date(session.startedAt).getTime();
+  const now = Date.now();
+  const expectedDuration = session.duration * 60 * 1000; // Convert to milliseconds
+  const gracePeroid = 5 * 60 * 1000; // 5 minute grace period
+  
+  return (now - startTime) > (expectedDuration + gracePeroid);
+};
+
+export const isBreakStale = (breakSession: BreakSession): boolean => {
+  if (breakSession.completed) return false;
+  
+  const startTime = new Date(breakSession.startedAt).getTime();
+  const now = Date.now();
+  const expectedDuration = breakSession.duration * 60 * 1000; // Convert to milliseconds
+  const gracePeroid = 5 * 60 * 1000; // 5 minute grace period
+  
+  return (now - startTime) > (expectedDuration + gracePeroid);
+};
+
+export const getStaleOrphanedSessions = (): FocusSession[] => {
+  return getOrphanedSessions().filter(isSessionStale);
+};
+
+export const getStaleOrphanedBreaks = (): BreakSession[] => {
+  return getOrphanedBreaks().filter(isBreakStale);
 };

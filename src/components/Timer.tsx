@@ -2,9 +2,17 @@ import { useState, useEffect, useRef } from "react";
 import { 
   FocusTask, 
   FocusSession,
+  BreakSession,
   getTodaysFocusTasks, 
   startFocusSession, 
-  completeFocusSession 
+  completeFocusSession,
+  getBreakRecommendation,
+  startBreakSession,
+  completeBreakSession,
+  getOrphanedSessions,
+  getOrphanedBreaks,
+  cleanupOrphanedSessions,
+  cleanupOrphanedBreaks
 } from "../lib/fileUtils";
 
 function Timer() {
@@ -24,7 +32,39 @@ function Timer() {
   const [showSessionComplete, setShowSessionComplete] = useState(false);
   const [sessionNotes, setSessionNotes] = useState("");
   
+  // Break system states
+  const [showBreakSuggestion, setShowBreakSuggestion] = useState(false);
+  const [breakRecommendation, setBreakRecommendation] = useState<{shouldBreak: boolean; duration: number; message: string} | null>(null);
+  const [isOnBreak, setIsOnBreak] = useState(false);
+  const [currentBreak, setCurrentBreak] = useState<BreakSession | null>(null);
+  const [breakTimeLeft, setBreakTimeLeft] = useState(0);
+  const [breakActivity, setBreakActivity] = useState("");
+  const [selectedBreakDuration, setSelectedBreakDuration] = useState(5);
+  
+  // Orphaned session cleanup states
+  const [showOrphanedSessionsModal, setShowOrphanedSessionsModal] = useState(false);
+  const [orphanedSessions, setOrphanedSessions] = useState<FocusSession[]>([]);
+  const [orphanedBreaks, setOrphanedBreaks] = useState<BreakSession[]>([]);
+  
   const intervalRef = useRef<number | null>(null);
+
+  // Check for orphaned sessions on component mount
+  useEffect(() => {
+    const checkOrphanedSessions = () => {
+      const orphanedSessions = getOrphanedSessions();
+      const orphanedBreaks = getOrphanedBreaks();
+      
+      if (orphanedSessions.length > 0 || orphanedBreaks.length > 0) {
+        setOrphanedSessions(orphanedSessions);
+        setOrphanedBreaks(orphanedBreaks);
+        setShowOrphanedSessionsModal(true);
+      }
+    };
+    
+    // Small delay to let the component render first
+    const timeoutId = setTimeout(checkOrphanedSessions, 500);
+    return () => clearTimeout(timeoutId);
+  }, []);
 
   const playAlertSound = () => {
     if (soundOption === 'none') return;
@@ -216,7 +256,7 @@ function Timer() {
     try {
       // Try Tauri notification first (better desktop integration)
       const { sendNotification } = await import('@tauri-apps/api/notification');
-      await sendNotification({
+      sendNotification({
         title: `⏰ ${title}`,
         body: body,
       });
@@ -291,7 +331,7 @@ function Timer() {
               try {
                 // Try Tauri notification first (better desktop integration)
                 const { sendNotification } = await import('@tauri-apps/api/notification');
-                await sendNotification({
+                sendNotification({
                   title: 'Focus Timer Complete! 🎉',
                   body: currentSession ? `Completed: ${currentSession.taskTitle}` : 'Great job! Time for a well-deserved break.',
                 });
@@ -327,6 +367,56 @@ function Timer() {
       }
     };
   }, [isRunning, timeLeft]);
+
+  // Break timer logic
+  useEffect(() => {
+    if (isOnBreak && breakTimeLeft > 0) {
+      intervalRef.current = setInterval(() => {
+        setBreakTimeLeft(prev => {
+          if (prev <= 1) {
+            // Break complete
+            (async () => {
+              try {
+                // Try Tauri notification first
+                const { sendNotification } = await import('@tauri-apps/api/notification');
+                sendNotification({
+                  title: 'Break Complete! 🌟',
+                  body: 'Ready to get back to focused work?',
+                });
+              } catch (error) {
+                // Fallback to browser notification
+                if (Notification.permission === 'granted') {
+                  new Notification('Break Complete! 🌟', {
+                    body: 'Ready to get back to focused work?',
+                    icon: '⏰'
+                  });
+                }
+              }
+            })();
+            
+            // Play gentle sound
+            playAlertSound();
+            
+            // Auto-complete the break
+            handleCompleteBreak();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [isOnBreak, breakTimeLeft]);
 
   // Request notification permission on mount
   useEffect(() => {
@@ -367,6 +457,14 @@ function Timer() {
       setCurrentSession(null);
       setSessionNotes("");
       loadTasks(); // Refresh tasks to show updated session counts
+      
+      // Check if we should recommend a break
+      const recommendation = getBreakRecommendation();
+      if (recommendation.shouldBreak) {
+        setBreakRecommendation(recommendation);
+        setSelectedBreakDuration(recommendation.duration); // Set default to recommended duration
+        setShowBreakSuggestion(true);
+      }
     }
     setShowSessionComplete(false);
   };
@@ -376,6 +474,66 @@ function Timer() {
     setCurrentSession(null);
     setSessionNotes("");
     setShowSessionComplete(false);
+  };
+
+  // Break handling functions
+  const handleTakeBreak = () => {
+    const breakSession = startBreakSession(selectedBreakDuration, breakActivity);
+    setCurrentBreak(breakSession);
+    setBreakTimeLeft(selectedBreakDuration * 60); // Convert to seconds
+    setIsOnBreak(true);
+    setShowBreakSuggestion(false);
+  };
+
+  const handleSkipBreak = () => {
+    setShowBreakSuggestion(false);
+    setBreakRecommendation(null);
+    setBreakActivity("");
+    setSelectedBreakDuration(5); // Reset to default
+  };
+
+  const handleCompleteBreak = () => {
+    if (currentBreak) {
+      completeBreakSession(currentBreak.id);
+      setCurrentBreak(null);
+    }
+    setIsOnBreak(false);
+    setBreakTimeLeft(0);
+    setBreakActivity("");
+    
+    // Reset timer state and show task selection for next session
+    setIsRunning(false);
+    setTimeLeft(duration * 60);
+    setIsCompleted(false);
+    setTwoMinuteWarningShown(false);
+    setOneMinuteWarningShown(false);
+    setShowTaskSelection(true);
+  };
+
+  // Orphaned session cleanup handlers
+  const handleCompleteOrphanedSessions = () => {
+    cleanupOrphanedSessions('complete');
+    cleanupOrphanedBreaks('complete');
+    setShowOrphanedSessionsModal(false);
+    setOrphanedSessions([]);
+    setOrphanedBreaks([]);
+    loadTasks(); // Refresh to show updated session counts
+  };
+
+  const handleDeleteOrphanedSessions = () => {
+    cleanupOrphanedSessions('delete');
+    cleanupOrphanedBreaks('delete');
+    setShowOrphanedSessionsModal(false);
+    setOrphanedSessions([]);
+    setOrphanedBreaks([]);
+    loadTasks(); // Refresh to show updated session counts
+  };
+
+  const handleKeepOrphanedSessions = () => {
+    // Just close the modal and keep the orphaned sessions as-is
+    setShowOrphanedSessionsModal(false);
+    setOrphanedSessions([]);
+    setOrphanedBreaks([]);
   };
 
   const handlePause = () => {
@@ -458,18 +616,40 @@ function Timer() {
     <div className="h-full flex flex-col items-center justify-start p-4 bg-gradient-to-br from-blue-50 to-indigo-100 overflow-auto">
       {/* Header */}
       <div className="text-center mb-4 flex-shrink-0">
-        <h2 className="text-2xl font-bold text-gray-800 mb-1">Focus Timer</h2>
-        <p className="text-gray-600 text-sm">Set your focus time and watch the clock count down</p>
+        <h2 className="text-2xl font-bold text-gray-800 mb-1">
+          {isOnBreak ? "Break Timer" : "Focus Timer"}
+        </h2>
+        <p className="text-gray-600 text-sm">
+          {isOnBreak 
+            ? "Take a break and recharge your energy" 
+            : "Set your focus time and watch the clock count down"
+          }
+        </p>
       </div>
 
       {/* Active Task Display */}
-      {currentSession && (
+      {currentSession && !isOnBreak && (
         <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-4 mb-4 flex-shrink-0 max-w-md">
           <div className="text-center">
             <h3 className="text-lg font-semibold text-gray-800 mb-1">Currently Working On</h3>
             <p className="text-blue-600 font-medium">{currentSession.taskTitle}</p>
             <div className="text-xs text-gray-500 mt-2">
               Session Duration: {currentSession.duration} minutes
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Break Display */}
+      {isOnBreak && currentBreak && (
+        <div className="bg-green-50 rounded-xl shadow-lg border border-green-200 p-4 mb-4 flex-shrink-0 max-w-md">
+          <div className="text-center">
+            <h3 className="text-lg font-semibold text-green-800 mb-1">On Break</h3>
+            <p className="text-green-600 font-medium">
+              {currentBreak.activity || "Recharging..."}
+            </p>
+            <div className="text-xs text-green-600 mt-2">
+              Break Duration: {currentBreak.duration} minutes
             </div>
           </div>
         </div>
@@ -582,11 +762,16 @@ function Timer() {
 
         {/* Digital display overlay */}
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="bg-white bg-opacity-90 px-4 py-2 rounded-xl shadow-lg border-2 border-gray-200">
+          <div className={`bg-white bg-opacity-90 px-4 py-2 rounded-xl shadow-lg border-2 ${
+            isOnBreak ? 'border-green-200' : 'border-gray-200'
+          }`}>
             <div className={`text-3xl font-mono font-bold ${
-              isCompleted ? 'text-green-600' : isRunning ? 'text-blue-600' : 'text-gray-700'
+              isOnBreak ? 'text-green-600' :
+              isCompleted ? 'text-green-600' : 
+              isRunning ? 'text-blue-600' : 
+              'text-gray-700'
             }`}>
-              {formatTime(timeLeft)}
+              {formatTime(isOnBreak ? breakTimeLeft : timeLeft)}
             </div>
           </div>
         </div>
@@ -862,6 +1047,169 @@ function Timer() {
                 >
                   <span>✅</span>
                   <span>Complete Session</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Break Suggestion Modal */}
+      {showBreakSuggestion && breakRecommendation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+            <div className="p-6">
+              <div className="flex items-center space-x-4 mb-4">
+                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <span className="text-green-600 text-xl">🌟</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Time for a Break!</h3>
+                  <p className="text-sm text-gray-500 mt-1">Recharge and come back stronger</p>
+                </div>
+              </div>
+              
+              <div className="mb-4">
+                <p className="text-gray-700 mb-3">{breakRecommendation.message}</p>
+              </div>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Break Duration
+                </label>
+                <div className="flex space-x-2">
+                  {[5, 10, 15].map((minutes) => (
+                    <button
+                      key={minutes}
+                      onClick={() => setSelectedBreakDuration(minutes)}
+                      className={`flex-1 px-3 py-2 rounded-lg border transition-all duration-200 font-medium ${
+                        selectedBreakDuration === minutes
+                          ? 'bg-green-600 text-white border-green-600'
+                          : 'bg-white text-gray-700 border-gray-300 hover:border-green-500'
+                      }`}
+                    >
+                      {minutes} min
+                    </button>
+                  ))}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Recommended: {breakRecommendation.duration} minutes
+                </div>
+              </div>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Break Activity (optional)
+                </label>
+                <select
+                  value={breakActivity}
+                  onChange={(e) => setBreakActivity(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                >
+                  <option value="">Just relax</option>
+                  <option value="☕ Get some coffee">☕ Get some coffee</option>
+                  <option value="🚶 Take a short walk">🚶 Take a short walk</option>
+                  <option value="💧 Drink some water">💧 Drink some water</option>
+                  <option value="👀 Look away from screen">👀 Look away from screen</option>
+                  <option value="🧘 Do some stretches">🧘 Do some stretches</option>
+                  <option value="🍎 Have a healthy snack">🍎 Have a healthy snack</option>
+                  <option value="📱 Check messages">📱 Check messages</option>
+                </select>
+              </div>
+              
+              <div className="flex space-x-3">
+                <button
+                  onClick={handleSkipBreak}
+                  className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium"
+                >
+                  Continue Working
+                </button>
+                <button
+                  onClick={handleTakeBreak}
+                  className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all duration-200 font-medium flex items-center justify-center space-x-2"
+                >
+                  <span>☕</span>
+                  <span>Take Break</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Orphaned Sessions Cleanup Modal */}
+      {showOrphanedSessionsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden">
+            <div className="p-6">
+              <div className="flex items-center space-x-4 mb-4">
+                <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <span className="text-orange-600 text-xl">⚠️</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Incomplete Sessions Found</h3>
+                  <p className="text-sm text-gray-500 mt-1">Previous sessions weren't completed</p>
+                </div>
+              </div>
+              
+              <div className="mb-4">
+                <p className="text-gray-700 mb-3">
+                  Found {orphanedSessions.length} incomplete focus session{orphanedSessions.length !== 1 ? 's' : ''}
+                  {orphanedBreaks.length > 0 && ` and ${orphanedBreaks.length} incomplete break${orphanedBreaks.length !== 1 ? 's' : ''}`} 
+                  from your previous app session.
+                </p>
+                
+                {orphanedSessions.length > 0 && (
+                  <div className="bg-gray-50 rounded-lg p-3 mb-3">
+                    <h4 className="font-medium text-gray-800 mb-2">Incomplete Focus Sessions:</h4>
+                    <ul className="space-y-1">
+                      {orphanedSessions.map((session) => (
+                        <li key={session.id} className="text-sm text-gray-600">
+                          • {session.taskTitle} ({session.duration} min)
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {orphanedBreaks.length > 0 && (
+                  <div className="bg-gray-50 rounded-lg p-3 mb-3">
+                    <h4 className="font-medium text-gray-800 mb-2">Incomplete Breaks:</h4>
+                    <ul className="space-y-1">
+                      {orphanedBreaks.map((breakSession) => (
+                        <li key={breakSession.id} className="text-sm text-gray-600">
+                          • {breakSession.activity || 'Break'} ({breakSession.duration} min)
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                <p className="text-sm text-gray-600">
+                  What would you like to do with these incomplete sessions?
+                </p>
+              </div>
+              
+              <div className="flex flex-col space-y-2">
+                <button
+                  onClick={handleCompleteOrphanedSessions}
+                  className="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all duration-200 font-medium flex items-center justify-center space-x-2"
+                >
+                  <span>✅</span>
+                  <span>Mark as Completed</span>
+                </button>
+                <button
+                  onClick={handleDeleteOrphanedSessions}
+                  className="w-full px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all duration-200 font-medium flex items-center justify-center space-x-2"
+                >
+                  <span>🗑️</span>
+                  <span>Delete Sessions</span>
+                </button>
+                <button
+                  onClick={handleKeepOrphanedSessions}
+                  className="w-full px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium"
+                >
+                  Keep As-Is (I'll handle later)
                 </button>
               </div>
             </div>

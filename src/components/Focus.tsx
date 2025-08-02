@@ -2,16 +2,23 @@ import { useState, useEffect } from "react";
 import { 
   FocusTask, 
   FocusSession,
+  BreakSession,
   getTodaysFocusTasks, 
   getTodaysFocusSessions,
+  getTodaysBreakSessions,
   addFocusTask, 
   updateFocusTask, 
-  deleteFocusTask 
+  deleteFocusTask,
+  getOrphanedSessions,
+  getOrphanedBreaks,
+  cleanupOrphanedSessions,
+  cleanupOrphanedBreaks
 } from "../lib/fileUtils";
 
 function Focus() {
   const [tasks, setTasks] = useState<FocusTask[]>([]);
   const [sessions, setSessions] = useState<FocusSession[]>([]);
+  const [breaks, setBreaks] = useState<BreakSession[]>([]);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskCategory, setNewTaskCategory] = useState<FocusTask['category']>('deep-work');
   const [showAddTask, setShowAddTask] = useState(false);
@@ -34,10 +41,11 @@ function Focus() {
     'other': 'bg-yellow-100 text-yellow-800 border-yellow-200'
   };
 
-  // Load tasks and sessions
+  // Load tasks, sessions, and breaks
   const loadData = () => {
     setTasks(getTodaysFocusTasks());
     setSessions(getTodaysFocusSessions());
+    setBreaks(getTodaysBreakSessions());
   };
 
   useEffect(() => {
@@ -72,12 +80,34 @@ function Focus() {
     }
   };
 
+  // Clean up orphaned sessions
+  const handleCleanupOrphans = () => {
+    const orphanedSessions = getOrphanedSessions();
+    const orphanedBreaks = getOrphanedBreaks();
+    
+    if (orphanedSessions.length === 0 && orphanedBreaks.length === 0) {
+      alert("No incomplete sessions found!");
+      return;
+    }
+    
+    const sessionCount = orphanedSessions.length;
+    const breakCount = orphanedBreaks.length;
+    const message = `Found ${sessionCount} incomplete focus session${sessionCount !== 1 ? 's' : ''}${breakCount > 0 ? ` and ${breakCount} incomplete break${breakCount !== 1 ? 's' : ''}` : ''}. Mark them as completed?`;
+    
+    if (confirm(message)) {
+      cleanupOrphanedSessions('complete');
+      cleanupOrphanedBreaks('complete');
+      loadData();
+    }
+  };
+
   // Calculate today's stats
   const completedSessions = sessions.filter(s => s.completed).length;
   const totalSessionTime = sessions
     .filter(s => s.completed)
     .reduce((sum, s) => sum + s.duration, 0);
   const completedTasks = tasks.filter(t => t.completed).length;
+  const completedBreaks = breaks.filter(b => b.completed).length;
 
   return (
     <div className="h-full flex flex-col">
@@ -96,12 +126,27 @@ function Focus() {
               <div className="text-gray-500">Sessions</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-green-600">{Math.round(totalSessionTime / 60)}h {totalSessionTime % 60}m</div>
+              <div className="text-2xl font-bold text-green-600">{Math.floor(totalSessionTime / 60)}h {totalSessionTime % 60}m</div>
               <div className="text-gray-500">Focus Time</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-orange-600">{completedBreaks}</div>
+              <div className="text-gray-500">Breaks</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-purple-600">{completedTasks}/{tasks.length}</div>
               <div className="text-gray-500">Tasks Done</div>
+            </div>
+            
+            {/* Cleanup Button */}
+            <div className="ml-4">
+              <button
+                onClick={handleCleanupOrphans}
+                className="px-3 py-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 transition-colors text-xs font-medium border border-orange-200"
+                title="Clean up incomplete sessions from app restarts"
+              >
+                🧹 Cleanup
+              </button>
             </div>
           </div>
         </div>
@@ -251,35 +296,57 @@ function Focus() {
             )}
           </div>
 
-          {/* Recent Sessions */}
-          {sessions.length > 0 && (
+          {/* Recent Activity */}
+          {(sessions.length > 0 || breaks.length > 0) && (
             <div className="mt-8">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">Today's Sessions</h3>
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">Today's Activity</h3>
               <div className="space-y-2">
-                {sessions.slice(-5).reverse().map((session) => (
+                {/* Combine sessions and breaks, then sort by time */}
+                {[
+                  ...sessions.map(s => ({...s, type: 'session' as const})),
+                  ...breaks.map(b => ({...b, type: 'break' as const}))
+                ]
+                .sort((a, b) => {
+                  const timeA = new Date(a.completedAt || (a.type === 'break' ? (a as any).startedAt : '') || '').getTime();
+                  const timeB = new Date(b.completedAt || (b.type === 'break' ? (b as any).startedAt : '') || '').getTime();
+                  return timeB - timeA; // Most recent first
+                })
+                .slice(0, 8) // Show last 8 activities
+                .map((activity) => (
                   <div
-                    key={session.id}
+                    key={activity.id}
                     className={`bg-white rounded-lg border border-gray-200 p-3 ${
-                      session.completed ? 'border-green-200 bg-green-50' : 'border-orange-200 bg-orange-50'
+                      activity.completed 
+                        ? activity.type === 'session' ? 'border-blue-200 bg-blue-50' : 'border-green-200 bg-green-50'
+                        : 'border-orange-200 bg-orange-50'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="font-medium text-gray-800">{session.taskTitle}</span>
+                        <span className="font-medium text-gray-800">
+                          {activity.type === 'session' 
+                            ? (activity as any).taskTitle 
+                            : `Break: ${(activity as any).activity || 'Recharging'}`
+                          }
+                        </span>
                         <span className="text-sm text-gray-500 ml-2">
-                          ({session.duration} min)
+                          ({activity.duration} min)
                         </span>
                       </div>
                       <div className="text-sm">
-                        {session.completed ? (
-                          <span className="text-green-600 font-medium">✓ Completed</span>
+                        {activity.completed ? (
+                          <span className={`font-medium ${
+                            activity.type === 'session' ? 'text-blue-600' : 'text-green-600'
+                          }`}>
+                            {activity.type === 'session' ? '✓ Focused' : '☕ Rested'}
+                          </span>
                         ) : (
                           <span className="text-orange-600 font-medium">⏱️ In Progress</span>
                         )}
                       </div>
                     </div>
-                    {session.notes && (
-                      <p className="text-sm text-gray-600 mt-1">{session.notes}</p>
+                    {activity.type === 'session' && (activity as any).notes && (
+                      <p className="text-sm text-gray-600 mt-1">{(activity as any).notes}</p>
                     )}
                   </div>
                 ))}
