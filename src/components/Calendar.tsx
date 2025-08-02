@@ -274,7 +274,7 @@ function Calendar() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="p-6 border-b border-gray-200">
+      <div className="p-4 border-b border-gray-200 flex-shrink-0">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold text-gray-800">Project Calendar</h2>
           <div className="flex items-center space-x-4">
@@ -298,19 +298,19 @@ function Calendar() {
       </div>
 
       {/* Calendar Grid */}
-      <div className="flex-1 p-6">
-        <div className="h-full bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="flex-1 p-4 overflow-hidden">
+        <div className="h-full bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col">
           {/* Days of week header */}
-          <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
+          <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200 flex-shrink-0">
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-              <div key={day} className="p-3 text-center text-sm font-medium text-gray-600 border-r border-gray-200 last:border-r-0">
+              <div key={day} className="p-2 text-center text-sm font-medium text-gray-600 border-r border-gray-200 last:border-r-0">
                 {day}
               </div>
             ))}
           </div>
 
           {/* Calendar Days */}
-          <div className="grid grid-cols-7 flex-1" style={{ gridTemplateRows: 'repeat(6, 1fr)' }}>
+          <div className="grid grid-cols-7 flex-1 overflow-hidden" style={{ gridTemplateRows: 'repeat(6, 1fr)' }}>
             {calendarDays.map((day, index) => {
               const dayBlocks = day ? getTimeBlocksForDay(day) : [];
               const isSelected = day ? isDayInSelection(day) : false;
@@ -320,7 +320,7 @@ function Calendar() {
               return (
                 <div
                   key={index}
-                  className={`border-r border-b border-gray-200 last:border-r-0 p-2 min-h-[100px] relative select-none ${
+                  className={`border-r border-b border-gray-200 last:border-r-0 p-1 h-full relative select-none flex flex-col overflow-hidden ${
                     day && isWeekdayDay ? 'hover:bg-gray-50 cursor-pointer' : ''
                   } ${
                     day && !isWeekdayDay ? 'bg-gray-100 cursor-not-allowed' : ''
@@ -335,7 +335,7 @@ function Calendar() {
                 >
                   {day && (
                     <>
-                      <div className={`text-sm font-medium mb-1 ${
+                      <div className={`text-sm font-medium mb-1 flex-shrink-0 ${
                         isToday(day) ? 'text-blue-600' : isWeekdayDay ? 'text-gray-700' : 'text-gray-400'
                       }`}>
                         {day}
@@ -359,7 +359,7 @@ function Calendar() {
                         return (
                           <div
                             key={`${block.id}-${blockIndex}`}
-                            className="text-xs p-1 mb-1 rounded text-white font-medium truncate cursor-pointer hover:opacity-90 group relative"
+                            className="text-xs p-1 mb-1 rounded text-white font-medium cursor-pointer hover:opacity-90 group relative flex-shrink-0"
                             style={{ backgroundColor: block.color }}
                             title={`${block.project}: ${dayLabel} (Click to edit)`}
                             onClick={(e) => handleEditBlock(block, e)}
