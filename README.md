@@ -73,10 +73,10 @@ rustup target add x86_64-unknown-linux-gnu # Linux 64-bit
 Then build for your target:
 ```bash
 # Build for specific platform
-npm run tauri build --target aarch64-apple-darwin     # Mac M1+
-npm run tauri build --target x86_64-apple-darwin      # Mac Intel
-npm run tauri build --target x86_64-pc-windows-msvc   # Windows
-npm run tauri build --target x86_64-unknown-linux-gnu # Linux
+npm run tauri build -- --target aarch64-apple-darwin     # Mac M1+
+npm run tauri build -- --target x86_64-apple-darwin      # Mac Intel
+npm run tauri build -- --target x86_64-pc-windows-msvc   # Windows
+npm run tauri build -- --target x86_64-unknown-linux-gnu # Linux
 ```
 
 ### Bundle-Specific Builds
