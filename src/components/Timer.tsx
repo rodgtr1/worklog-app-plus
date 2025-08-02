@@ -6,6 +6,8 @@ function Timer() {
   const [isRunning, setIsRunning] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
   const [soundOption, setSoundOption] = useState<'gentle' | 'chime' | 'ding' | 'success' | 'none'>('gentle');
+  const [twoMinuteWarningShown, setTwoMinuteWarningShown] = useState(false);
+  const [oneMinuteWarningShown, setOneMinuteWarningShown] = useState(false);
   const intervalRef = useRef<number | null>(null);
 
   const playAlertSound = () => {
@@ -105,11 +107,121 @@ function Timer() {
     }
   };
 
+  const playWarningSound = (count: number) => {
+    if (soundOption === 'none') return;
+    
+    const playSound = () => {
+      try {
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        
+        if (soundOption === 'gentle') {
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          
+          oscillator.frequency.setValueAtTime(600, audioContext.currentTime);
+          oscillator.frequency.exponentialRampToValueAtTime(300, audioContext.currentTime + 0.5);
+          
+          gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+          
+          oscillator.start(audioContext.currentTime);
+          oscillator.stop(audioContext.currentTime + 0.5);
+          
+        } else if (soundOption === 'chime') {
+          const osc = audioContext.createOscillator();
+          const gain = audioContext.createGain();
+          
+          osc.connect(gain);
+          gain.connect(audioContext.destination);
+          
+          osc.frequency.value = 523.25; // C5
+          osc.type = 'sine';
+          
+          gain.gain.setValueAtTime(0.15, audioContext.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.4);
+          
+          osc.start(audioContext.currentTime);
+          osc.stop(audioContext.currentTime + 0.4);
+          
+        } else if (soundOption === 'ding') {
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          
+          oscillator.frequency.value = 1000;
+          oscillator.type = 'sine';
+          
+          gainNode.gain.setValueAtTime(0.25, audioContext.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+          
+          oscillator.start(audioContext.currentTime);
+          oscillator.stop(audioContext.currentTime + 0.2);
+          
+        } else if (soundOption === 'success') {
+          const osc = audioContext.createOscillator();
+          const gain = audioContext.createGain();
+          
+          osc.connect(gain);
+          gain.connect(audioContext.destination);
+          
+          osc.frequency.value = 659.25; // E5
+          osc.type = 'triangle';
+          
+          gain.gain.setValueAtTime(0.15, audioContext.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+          
+          osc.start(audioContext.currentTime);
+          osc.stop(audioContext.currentTime + 0.3);
+        }
+        
+      } catch (error) {
+        console.log('Warning audio failed:', error);
+      }
+    };
+
+    // Play the sound 'count' number of times
+    for (let i = 0; i < count; i++) {
+      setTimeout(() => playSound(), i * 400);
+    }
+  };
+
+  const sendWarningNotification = async (timeRemaining: number) => {
+    const minutes = Math.floor(timeRemaining / 60);
+    const title = `${minutes} Minute${minutes > 1 ? 's' : ''} Remaining`;
+    const body = minutes === 2 
+      ? 'Start wrapping up your current task.' 
+      : 'Final minute - time to finish up!';
+
+    try {
+      // Try Tauri notification first (better desktop integration)
+      const { sendNotification } = await import('@tauri-apps/api/notification');
+      await sendNotification({
+        title: `⏰ ${title}`,
+        body: body,
+      });
+    } catch (error) {
+      // Fallback to browser notification
+      if (Notification.permission === 'granted') {
+        new Notification(`⏰ ${title}`, {
+          body: body,
+          icon: '⏰'
+        });
+      }
+    }
+  };
+
   // Update timeLeft when duration changes
   useEffect(() => {
     if (!isRunning) {
       setTimeLeft(duration * 60);
       setIsCompleted(false);
+      setTwoMinuteWarningShown(false);
+      setOneMinuteWarningShown(false);
     }
   }, [duration, isRunning]);
 
@@ -118,6 +230,20 @@ function Timer() {
     if (isRunning && timeLeft > 0) {
       intervalRef.current = setInterval(() => {
         setTimeLeft(prev => {
+          // Check for 2-minute warning
+          if (prev === 121 && !twoMinuteWarningShown) {
+            setTwoMinuteWarningShown(true);
+            playWarningSound(1);
+            sendWarningNotification(120);
+          }
+          
+          // Check for 1-minute warning
+          if (prev === 61 && !oneMinuteWarningShown) {
+            setOneMinuteWarningShown(true);
+            playWarningSound(2);
+            sendWarningNotification(60);
+          }
+
           if (prev <= 1) {
             setIsRunning(false);
             setIsCompleted(true);
@@ -185,6 +311,8 @@ function Timer() {
     setIsRunning(false);
     setTimeLeft(duration * 60);
     setIsCompleted(false);
+    setTwoMinuteWarningShown(false);
+    setOneMinuteWarningShown(false);
   };
 
   // Calculate angles for timer

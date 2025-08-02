@@ -65,6 +65,45 @@ function Calendar() {
     return dayOfWeek >= 1 && dayOfWeek <= 5; // 1 = Monday, 5 = Friday
   };
 
+  // Helper function to count weekdays between two date strings (inclusive)
+  const countWeekdaysInDateRange = (startDateStr: string, endDateStr: string) => {
+    let count = 0;
+    const currentDate = new Date(startDateStr + 'T00:00:00');
+    const endDate = new Date(endDateStr + 'T00:00:00');
+    
+    while (currentDate <= endDate) {
+      if (isWeekday(currentDate)) {
+        count++;
+      }
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    return count;
+  };
+
+  // Helper function to get weekday number for a specific day within a project range
+  const getWeekdayNumberInDateRange = (targetDateStr: string, startDateStr: string) => {
+    let count = 0;
+    const currentDate = new Date(startDateStr + 'T00:00:00');
+    const targetDate = new Date(targetDateStr + 'T00:00:00');
+    
+    while (currentDate <= targetDate) {
+      if (isWeekday(currentDate)) {
+        count++;
+      }
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    return count;
+  };
+
+  // Helper function to count weekdays in a date range (for Date objects - used in modal)
+  const countWeekdaysInRange = (startDate: Date, endDate: Date) => {
+    const startStr = startDate.toISOString().split('T')[0];
+    const endStr = endDate.toISOString().split('T')[0];
+    return countWeekdaysInDateRange(startStr, endStr);
+  };
+
   // Date selection handlers - only allow weekdays
   const handleMouseDown = (day: number) => {
     const selectedDate = new Date(currentYear, currentMonth, day);
@@ -201,7 +240,13 @@ function Calendar() {
     return timeBlocks.filter(block => {
       const blockStart = new Date(block.startDate);
       const blockEnd = new Date(block.endDate);
-      return dayDate >= blockStart && dayDate <= blockEnd;
+      
+      // Compare dates using date strings to avoid timezone issues
+      const dayDateStr = dayDate.toISOString().split('T')[0];
+      const blockStartStr = blockStart.toISOString().split('T')[0];
+      const blockEndStr = blockEnd.toISOString().split('T')[0];
+      
+      return dayDateStr >= blockStartStr && dayDateStr <= blockEndStr;
     });
   };
 
@@ -303,26 +348,11 @@ function Calendar() {
                         const dayDate = new Date(currentYear, currentMonth, day);
                         
                         // Calculate which weekday of the project this is
-                        let weekdayNumber = 0;
-                        let totalWeekdays = 0;
-                        const tempDate = new Date(blockStart);
+                        // Use date strings to avoid any timezone conversion issues
+                        const dayDateStr = dayDate.toISOString().split('T')[0];
                         
-                        // Count weekdays up to current day
-                        while (tempDate <= dayDate) {
-                          if (isWeekday(tempDate)) {
-                            weekdayNumber++;
-                          }
-                          tempDate.setDate(tempDate.getDate() + 1);
-                        }
-                        
-                        // Count total weekdays in project
-                        tempDate.setTime(blockStart.getTime());
-                        while (tempDate <= blockEnd) {
-                          if (isWeekday(tempDate)) {
-                            totalWeekdays++;
-                          }
-                          tempDate.setDate(tempDate.getDate() + 1);
-                        }
+                        const weekdayNumber = getWeekdayNumberInDateRange(dayDateStr, block.startDate);
+                        const totalWeekdays = countWeekdaysInDateRange(block.startDate, block.endDate);
                         
                         const dayLabel = `Day ${weekdayNumber} of ${totalWeekdays}`;
                         
@@ -436,14 +466,7 @@ function Calendar() {
                     const endStr = end.toLocaleDateString();
                     
                     // Count only weekdays in the range
-                    let weekdayCount = 0;
-                    const currentDate = new Date(start);
-                    while (currentDate <= end) {
-                      if (isWeekday(currentDate)) {
-                        weekdayCount++;
-                      }
-                      currentDate.setDate(currentDate.getDate() + 1);
-                    }
+                    const weekdayCount = countWeekdaysInRange(start, end);
                     
                     return startStr === endStr 
                       ? `${startStr} (1 weekday)`
