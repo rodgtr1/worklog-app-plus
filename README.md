@@ -51,6 +51,50 @@ A cross-platform desktop application built with Tauri and React that helps you t
    npm run tauri build
    ```
 
+## Building for Specific Platforms
+
+You can build for specific platforms or bundle formats using these commands:
+
+### Platform-Specific Builds
+First install the target platform:
+```bash
+# For macOS targets
+rustup target add aarch64-apple-darwin    # Apple Silicon (M1/M2/M3)
+rustup target add x86_64-apple-darwin     # Intel Macs
+
+# For Windows targets  
+rustup target add x86_64-pc-windows-msvc  # Windows 64-bit
+rustup target add i686-pc-windows-msvc    # Windows 32-bit
+
+# For Linux targets
+rustup target add x86_64-unknown-linux-gnu # Linux 64-bit
+```
+
+Then build for your target:
+```bash
+# Build for specific platform
+npm run tauri build --target aarch64-apple-darwin     # Mac M1+
+npm run tauri build --target x86_64-apple-darwin      # Mac Intel
+npm run tauri build --target x86_64-pc-windows-msvc   # Windows
+npm run tauri build --target x86_64-unknown-linux-gnu # Linux
+```
+
+### Bundle-Specific Builds
+```bash
+# Build specific bundle types only
+npm run tauri build --bundles app      # macOS .app only
+npm run tauri build --bundles dmg      # macOS .dmg only
+npm run tauri build --bundles msi      # Windows .msi only  
+npm run tauri build --bundles deb      # Linux .deb only
+npm run tauri build --bundles appimage # Linux .AppImage only
+```
+
+### GitHub Releases
+For official releases, we use GitHub Actions to build for all platforms automatically. Check the [Releases page](../../releases) to download pre-built binaries for:
+- **macOS**: `.app` and `.dmg` (Intel + Apple Silicon)
+- **Windows**: `.msi` installer
+- **Linux**: `.deb` and `.AppImage`
+
 ## Usage
 
 ### Daily Input Mode
