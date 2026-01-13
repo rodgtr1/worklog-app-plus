@@ -10,6 +10,7 @@ use regex::Regex;
 use chrono::NaiveDate;
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct TimeBlock {
@@ -23,7 +24,7 @@ struct TimeBlock {
 // Helper function to get base directory for file storage
 // Development: uses local assets/ directory for easy access
 // Production: uses app data directory for persistence across updates
-fn get_base_dir() -> Result<PathBuf, String> {
+fn get_base_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     #[cfg(debug_assertions)]
     {
         // Development: use project root assets directory
@@ -33,13 +34,14 @@ fn get_base_dir() -> Result<PathBuf, String> {
         }
         Ok(assets_dir)
     }
-    
+
     #[cfg(not(debug_assertions))]
     {
-        // Production: use app data directory  
-        use tauri::api::path;
-        path::app_data_dir(&tauri::Config::default())
-            .ok_or("Failed to get app data directory".to_string())
+        // Production: use app data directory
+        app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("Failed to get app data directory: {}", e))
     }
 }
 
@@ -84,14 +86,14 @@ async fn delete_openai_key() -> Result<(), String> {
 }
 
 // Calendar-related functions
-fn get_calendar_path() -> Result<PathBuf, String> {
-    let base_dir = get_base_dir()?;
+fn get_calendar_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base_dir = get_base_dir(app_handle)?;
     Ok(base_dir.join("calendar.json"))
 }
 
 #[tauri::command]
-async fn read_calendar() -> Result<Vec<TimeBlock>, String> {
-    let calendar_path = get_calendar_path()?;
+async fn read_calendar(app_handle: tauri::AppHandle) -> Result<Vec<TimeBlock>, String> {
+    let calendar_path = get_calendar_path(&app_handle)?;
     
     let content = match fs::read_to_string(&calendar_path) {
         Ok(content) => content,
@@ -103,8 +105,8 @@ async fn read_calendar() -> Result<Vec<TimeBlock>, String> {
 }
 
 #[tauri::command]
-async fn save_calendar(time_blocks: Vec<TimeBlock>) -> Result<(), String> {
-    let calendar_path = get_calendar_path()?;
+async fn save_calendar(app_handle: tauri::AppHandle, time_blocks: Vec<TimeBlock>) -> Result<(), String> {
+    let calendar_path = get_calendar_path(&app_handle)?;
     
     let json = serde_json::to_string_pretty(&time_blocks)
         .map_err(|e| format!("Failed to serialize calendar data: {}", e))?;
@@ -116,8 +118,8 @@ async fn save_calendar(time_blocks: Vec<TimeBlock>) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn add_time_block(project: String, start_date: String, end_date: String, color: Option<String>) -> Result<String, String> {
-    let mut time_blocks = read_calendar().await?;
+async fn add_time_block(app_handle: tauri::AppHandle, project: String, start_date: String, end_date: String, color: Option<String>) -> Result<String, String> {
+    let mut time_blocks = read_calendar(app_handle.clone()).await?;
     
     // Use provided color or generate random color
     let final_color = color.unwrap_or_else(|| {
@@ -136,14 +138,14 @@ async fn add_time_block(project: String, start_date: String, end_date: String, c
     };
     
     time_blocks.push(new_block);
-    save_calendar(time_blocks).await?;
+    save_calendar(app_handle, time_blocks).await?;
     
     Ok(id)
 }
 
 #[tauri::command]
-async fn update_time_block(block_id: String, project: String, start_date: String, end_date: String, color: Option<String>) -> Result<(), String> {
-    let mut time_blocks = read_calendar().await?;
+async fn update_time_block(app_handle: tauri::AppHandle, block_id: String, project: String, start_date: String, end_date: String, color: Option<String>) -> Result<(), String> {
+    let mut time_blocks = read_calendar(app_handle.clone()).await?;
     
     if let Some(block) = time_blocks.iter_mut().find(|b| b.id == block_id) {
         block.project = project;
@@ -152,7 +154,7 @@ async fn update_time_block(block_id: String, project: String, start_date: String
         if let Some(new_color) = color {
             block.color = new_color;
         }
-        save_calendar(time_blocks).await?;
+        save_calendar(app_handle, time_blocks).await?;
         Ok(())
     } else {
         Err("Time block not found".to_string())
@@ -160,20 +162,20 @@ async fn update_time_block(block_id: String, project: String, start_date: String
 }
 
 #[tauri::command]
-async fn delete_time_block(block_id: String) -> Result<(), String> {
-    let mut time_blocks = read_calendar().await?;
+async fn delete_time_block(app_handle: tauri::AppHandle, block_id: String) -> Result<(), String> {
+    let mut time_blocks = read_calendar(app_handle.clone()).await?;
     time_blocks.retain(|block| block.id != block_id);
-    save_calendar(time_blocks).await?;
+    save_calendar(app_handle, time_blocks).await?;
     Ok(())
 }
 
 #[tauri::command]
-async fn process_worklog(entries: Vec<String>) -> Result<(), String> {
+async fn process_worklog(app_handle: tauri::AppHandle, entries: Vec<String>) -> Result<(), String> {
     // Get API key from secure storage
     let api_key = get_openai_key()?;
-    
+
     // Use base directory (assets/ in dev, app data in production)
-    let base_dir = get_base_dir()?;
+    let base_dir = get_base_dir(&app_handle)?;
     let worklog_path = base_dir.join("worklog.md");
     let backup_dir = base_dir.join("backups");
 
@@ -275,8 +277,8 @@ async fn process_worklog(entries: Vec<String>) -> Result<(), String> {
 
 
 #[tauri::command]
-async fn read_worklog() -> Result<String, String> {
-    let base_dir = get_base_dir()?;
+async fn read_worklog(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let base_dir = get_base_dir(&app_handle)?;
     let worklog_path = base_dir.join("worklog.md");
     
     match fs::read_to_string(&worklog_path) {
@@ -292,8 +294,8 @@ async fn read_worklog() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn undo_last_change() -> Result<(), String> {
-    let base_dir = get_base_dir()?;
+async fn undo_last_change(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let base_dir = get_base_dir(&app_handle)?;
     let backup_dir = base_dir.join("backups");
     let worklog_path = base_dir.join("worklog.md");
 
@@ -339,15 +341,16 @@ async fn undo_last_change() -> Result<(), String> {
 
 #[tauri::command]
 async fn generate_summary_report(
+    app_handle: tauri::AppHandle,
     start_date: String,
-    end_date: String, 
+    end_date: String,
     report_style: String
 ) -> Result<String, String> {
     // Get API key from secure storage
     let api_key = get_openai_key()?;
 
     // Read current worklog
-    let base_dir = get_base_dir()?;
+    let base_dir = get_base_dir(&app_handle)?;
     let worklog_path = base_dir.join("worklog.md");
     let current_log = match fs::read_to_string(&worklog_path) {
         Ok(content) => content,

@@ -253,21 +253,12 @@ function Timer() {
       ? 'Start wrapping up your current task.' 
       : 'Final minute - time to finish up!';
 
-    try {
-      // Try Tauri notification first (better desktop integration)
-      const { sendNotification } = await import('@tauri-apps/api/notification');
-      sendNotification({
-        title: `⏰ ${title}`,
+    // Use browser notification
+    if (Notification.permission === 'granted') {
+      new Notification(`⏰ ${title}`, {
         body: body,
+        icon: '⏰'
       });
-    } catch (error) {
-      // Fallback to browser notification
-      if (Notification.permission === 'granted') {
-        new Notification(`⏰ ${title}`, {
-          body: body,
-          icon: '⏰'
-        });
-      }
     }
   };
 
@@ -327,24 +318,12 @@ function Timer() {
             }
             
             // Gentle alert - native notification and audio
-            (async () => {
-              try {
-                // Try Tauri notification first (better desktop integration)
-                const { sendNotification } = await import('@tauri-apps/api/notification');
-                sendNotification({
-                  title: 'Focus Timer Complete! 🎉',
-                  body: currentSession ? `Completed: ${currentSession.taskTitle}` : 'Great job! Time for a well-deserved break.',
-                });
-              } catch (error) {
-                // Fallback to browser notification
-                if (Notification.permission === 'granted') {
-                  new Notification('Focus Timer Complete! 🎉', {
-                    body: currentSession ? `Completed: ${currentSession.taskTitle}` : 'Great job! Time for a break.',
-                    icon: '⏰'
-                  });
-                }
-              }
-            })();
+            if (Notification.permission === 'granted') {
+              new Notification('Focus Timer Complete! 🎉', {
+                body: currentSession ? `Completed: ${currentSession.taskTitle}` : 'Great job! Time for a break.',
+                icon: '⏰'
+              });
+            }
             // Play alert sound three times
             playAlertSound();
             setTimeout(() => playAlertSound(), 800);
@@ -374,25 +353,13 @@ function Timer() {
       intervalRef.current = setInterval(() => {
         setBreakTimeLeft(prev => {
           if (prev <= 1) {
-            // Break complete
-            (async () => {
-              try {
-                // Try Tauri notification first
-                const { sendNotification } = await import('@tauri-apps/api/notification');
-                sendNotification({
-                  title: 'Break Complete! 🌟',
-                  body: 'Ready to get back to focused work?',
-                });
-              } catch (error) {
-                // Fallback to browser notification
-                if (Notification.permission === 'granted') {
-                  new Notification('Break Complete! 🌟', {
-                    body: 'Ready to get back to focused work?',
-                    icon: '⏰'
-                  });
-                }
-              }
-            })();
+            // Break complete - use browser notification
+            if (Notification.permission === 'granted') {
+              new Notification('Break Complete! 🌟', {
+                body: 'Ready to get back to focused work?',
+                icon: '⏰'
+              });
+            }
             
             // Play gentle sound
             playAlertSound();
